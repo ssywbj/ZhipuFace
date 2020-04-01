@@ -1,6 +1,8 @@
 <resources>
     <string name="app_name">ZhipuFace</string>
     <string name="message">Watch face tapped</string>
-    <string name="my_analog_name">致璞表盘</string>
+    <string name="my_analog_name">My Analog</string>
+
+    <string name="zhipu_analog_name">致璞表盘</string>
     <string name="complications_provider_incrementing_number">Incrementing Number</string>
 </resources>

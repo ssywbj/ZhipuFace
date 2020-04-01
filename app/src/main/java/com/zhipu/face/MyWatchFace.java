@@ -21,7 +21,6 @@ import android.support.wearable.watchface.WatchFaceStyle;
 import android.view.SurfaceHolder;
 import android.widget.Toast;
 
-import androidx.annotation.NonNull;
 import androidx.palette.graphics.Palette;
 
 import java.lang.ref.WeakReference;
@@ -41,7 +40,7 @@ import java.util.concurrent.TimeUnit;
  * in the Google Watch Face Code Lab:
  * https://codelabs.developers.google.com/codelabs/watchface/index.html#0
  */
-public class MyWatchFaceBak extends CanvasWatchFaceService {
+public class MyWatchFace extends CanvasWatchFaceService {
 
     /*
      * Updates rate in milliseconds for interactive mode. We update once a second to advance the
@@ -60,18 +59,20 @@ public class MyWatchFaceBak extends CanvasWatchFaceService {
     }
 
     private static class EngineHandler extends Handler {
-        private final WeakReference<MyWatchFaceBak.Engine> mWeakReference;
+        private final WeakReference<Engine> mWeakReference;
 
-        private EngineHandler(MyWatchFaceBak.Engine reference) {
+        public EngineHandler(MyWatchFace.Engine reference) {
             mWeakReference = new WeakReference<>(reference);
         }
 
         @Override
-        public void handleMessage(@NonNull Message msg) {
-            MyWatchFaceBak.Engine engine = mWeakReference.get();
+        public void handleMessage(Message msg) {
+            MyWatchFace.Engine engine = mWeakReference.get();
             if (engine != null) {
-                if (msg.what == MSG_UPDATE_TIME) {
-                    engine.handleUpdateTimeMessage();
+                switch (msg.what) {
+                    case MSG_UPDATE_TIME:
+                        engine.handleUpdateTimeMessage();
+                        break;
                 }
             }
         }
@@ -121,7 +122,7 @@ public class MyWatchFaceBak extends CanvasWatchFaceService {
         public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
 
-            setWatchFaceStyle(new WatchFaceStyle.Builder(MyWatchFaceBak.this)
+            setWatchFaceStyle(new WatchFaceStyle.Builder(MyWatchFace.this)
                     .setAcceptsTapEvents(true)
                     .build());
 
@@ -464,7 +465,7 @@ public class MyWatchFaceBak extends CanvasWatchFaceService {
             }
             mRegisteredTimeZoneReceiver = true;
             IntentFilter filter = new IntentFilter(Intent.ACTION_TIMEZONE_CHANGED);
-            MyWatchFaceBak.this.registerReceiver(mTimeZoneReceiver, filter);
+            MyWatchFace.this.registerReceiver(mTimeZoneReceiver, filter);
         }
 
         private void unregisterReceiver() {
@@ -472,7 +473,7 @@ public class MyWatchFaceBak extends CanvasWatchFaceService {
                 return;
             }
             mRegisteredTimeZoneReceiver = false;
-            MyWatchFaceBak.this.unregisterReceiver(mTimeZoneReceiver);
+            MyWatchFace.this.unregisterReceiver(mTimeZoneReceiver);
         }
 
         /**
