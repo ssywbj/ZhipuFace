@@ -27,12 +27,11 @@ import java.util.concurrent.TimeUnit;
 
 public class ZhipuWatchFace extends CanvasWatchFaceService {
     private static final String TAG = ZhipuWatchFace.class.getSimpleName();
-    private boolean mInAmbientMode;
     private static final int MSG_UPDATE_TIME = 0;
-    private static final long INTERACTIVE_UPDATE_RATE_MS = TimeUnit.SECONDS.toMillis(1);
 
     @Override
     public Engine onCreateEngine() {
+        Log.d(TAG, "provide watch face implementation");
         return new FaceEngine();
     }
 
@@ -54,7 +53,14 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
         }
     }
 
+    /**
+     * implement service callback methods
+     * 表盘生命周期：onCreate->onSurfaceChanged->onDraw->onDestroy
+     * 启动表盘：onCreate->onSurfaceChanged->onDraw；更换表盘：onDestroy
+     */
     private class FaceEngine extends CanvasWatchFaceService.Engine {
+        private final long INTERACTIVE_UPDATE_RATE_MS = TimeUnit.SECONDS.toMillis(1);
+
         private static final float POINT_RADIUS = 5.0f;//圆点半径
         private static final int POINTS = 60;//绘制60个点
         private final double RADIANS = Math.toRadians(1.0f * 360 / POINTS);//弧度值，Math.toRadians：度换算成弧度
@@ -66,46 +72,115 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
         private float mCenterY;//圆心Y坐标
         private float mMaxRadius;
 
-        //生命周期：启动表盘，onCreate->onSurfaceChanged->onDraw；更换表盘，onDestroy
+        private float mHourPointWidth = 4;//时针宽度
+        private float mMinutePointWidth = 3;//分针宽度
+        private float mSecondPointWidth = 2;//秒针宽度
+        private int mHourPointColor = Color.RED; //时针的颜色
+        private int mMinutePointColor = Color.BLACK;//分针的颜色
+        private int mSecondPointColor = Color.WHITE;//秒针的颜色
+        private float mPointRadius = 2;//指针圆角
+        private float mPointEndLength = 20;//指针末尾长度
+
+        private boolean mLowBitAmbient;
+        private boolean mInAmbientMode;
+
+        private final Handler mUpdateTimeHandler = new EngineHandler(this);
+
+        /**
+         * 时区调整广播
+         */
+        private final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                Calendar.getInstance().setTimeZone(TimeZone.getDefault());
+                invalidate();
+            }
+        };
+        private boolean mRegisteredTimeZoneReceiver = false;
+
         @Override
         public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
-            Log.d(TAG, "---FaceEngine, onCreate---");
-            //setAcceptsTapEvents(true)：注册onTapCommand(int tapType, int x, int y, long eventTime)监听
+            Log.d(TAG, "onCreate, initialize watch face");
+
+            //setAcceptsTapEvents(true)：注册onTapCommand(int, int, int, long)监听
             setWatchFaceStyle(new WatchFaceStyle.Builder(ZhipuWatchFace.this).setAcceptsTapEvents(true)
                     .setAccentColor(Color.WHITE).setShowUnreadCountIndicator(true).build());
 
             this.initPaint();
         }
 
-        private void initPaint() {
-            mPaintText = new Paint();
-            mPaintText.setColor(Color.WHITE);
-            mPaintText.setAntiAlias(true);
-            mPaintText.setTextSize(50f);
-            mPaintText.setTypeface(Typeface.defaultFromStyle(Typeface.ITALIC));
-
-            mPaintPoint = new Paint();
-            mPaintPoint.setColor(Color.WHITE);
-            mPaintPoint.setAntiAlias(true);
-
-            mPaintPointer = new Paint();
-            mPaintPointer.setAntiAlias(true);
-            mPaintPointer.setDither(true);
+        @Override
+        public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            super.onSurfaceChanged(holder, format, width, height);
+            Log.d(TAG, "onSurfaceChanged, format = " + format + ", width = " + width + ", height = " + height);
         }
 
         @Override
-        public void onDestroy() {
-            Log.d(TAG, "---FaceEngine, onDestroy---");
-            mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
-            super.onDestroy();
+        public void onPropertiesChanged(Bundle properties) {
+            super.onPropertiesChanged(properties);
+            mLowBitAmbient = properties.getBoolean(PROPERTY_LOW_BIT_AMBIENT, false);
+            boolean burnInProtection = properties.getBoolean(PROPERTY_BURN_IN_PROTECTION, false);
+            Log.d(TAG, "onPropertiesChanged, get device features (burn-in, low-bit ambient), " +
+                    "lowBitAmbient = " + mLowBitAmbient + ", burnInProtection = " + burnInProtection);
+        }
+
+        /**
+         * 微光模式下，系统每分钟调用一次该方法
+         */
+        @Override
+        public void onTimeTick() {
+            super.onTimeTick();
+            Log.d(TAG, "onTimeTick, the time changed");
+            invalidate();
+        }
+
+        /**
+         * 模式改变时调用该方法。微光模式下，为了延长电池续航时间，绘制表盘主题的代码应相对简单，通常使用一组有限的颜色
+         * 来绘制形状的轮廓；交互模式下，可以使用全彩色、复杂的形状、渐变和动画来绘制表盘主题。
+         *
+         * @param inAmbientMode true:微光模式，false:交互模式
+         */
+        @Override
+        public void onAmbientModeChanged(boolean inAmbientMode) {
+            super.onAmbientModeChanged(inAmbientMode);
+            Log.d(TAG, "onAmbientModeChanged, the wearable switched between modes, inAmbientMode = " + inAmbientMode);
+            mInAmbientMode = inAmbientMode;
+            if (mLowBitAmbient) {
+                boolean antiAlias = !inAmbientMode;
+                mPaintText.setAntiAlias(antiAlias);
+                mPaintPoint.setAntiAlias(antiAlias);
+                mPaintPointer.setAntiAlias(antiAlias);
+            }
+            this.updateTimer();
+        }
+
+        /**
+         * 表盘界面不可见时会调用该方法，如按表冠键显示其它页面导致
+         *
+         * @param visible true:表盘可见，反之不可见
+         */
+        @Override
+        public void onVisibilityChanged(boolean visible) {
+            super.onVisibilityChanged(visible);
+            Log.d(TAG, "onVisibilityChanged, visible = " + visible);
+            if (visible) {
+                this.registerReceiver();
+                /* Update time zone in case it changed while we weren't visible. */
+                Calendar.getInstance().setTimeZone(TimeZone.getDefault());
+                invalidate();
+            } else {
+                this.unregisterReceiver();
+            }
+
+            this.updateTimer();
         }
 
         @Override
         public void onDraw(Canvas canvas, Rect bounds) {
             int width = canvas.getWidth();
             int height = canvas.getHeight();
-            Log.d(TAG, "---FaceEngine, onDraw---width = " + width + ", height = " + height);
+            Log.d(TAG, "onDraw, draw watch face, width = " + width + ", height = " + height);
 
             int hour = Calendar.getInstance().get(Calendar.HOUR);//时
             int minute = Calendar.getInstance().get(Calendar.MINUTE);//分
@@ -149,7 +224,34 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                 mPaintText.setTypeface(Typeface.defaultFromStyle(Typeface.ITALIC));
                 canvas.drawText(text, (width - mPaintText.measureText(text)) / 2, textPaintHeight, mPaintText);
             }
+        }
 
+        @Override
+        public void onTapCommand(int tapType, int x, int y, long eventTime) {
+            String onTapCommand = "onTapCommand, tapType = " + tapType + ", x = " + x + ", y = "
+                    + y + ", eventTime = " + eventTime;
+            switch (tapType) {
+                case TAP_TYPE_TOUCH:
+                    Log.d(TAG, onTapCommand + ", touch");
+                    break;
+                case TAP_TYPE_TOUCH_CANCEL:
+                    Log.d(TAG, onTapCommand + ", touch cancel");
+                    break;
+                case TAP_TYPE_TAP:
+                    Log.d(TAG, onTapCommand + ", tap");
+                    break;
+                default:
+                    break;
+            }
+            Log.d(TAG, onTapCommand);
+            invalidate();
+        }
+
+        @Override
+        public void onDestroy() {
+            Log.d(TAG, "onDestroy");
+            mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
+            super.onDestroy();
         }
 
         private String addZero(int number) {
@@ -158,6 +260,22 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                 sBuilder.insert(0, "0");
             }
             return sBuilder.toString();
+        }
+
+        private void initPaint() {
+            mPaintText = new Paint();
+            mPaintText.setColor(Color.WHITE);
+            mPaintText.setAntiAlias(true);
+            mPaintText.setTextSize(50f);
+            mPaintText.setTypeface(Typeface.defaultFromStyle(Typeface.ITALIC));
+
+            mPaintPoint = new Paint();
+            mPaintPoint.setColor(Color.WHITE);
+            mPaintPoint.setAntiAlias(true);
+
+            mPaintPointer = new Paint();
+            mPaintPointer.setAntiAlias(true);
+            mPaintPointer.setDither(true);
         }
 
         private void paintScaleNumber(Canvas canvas) {
@@ -196,15 +314,6 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
             canvas.restore();
         }
-
-        private float mHourPointWidth = 4;//时针宽度
-        private float mMinutePointWidth = 3;//分针宽度
-        private float mSecondPointWidth = 2;//秒针宽度
-        private int mHourPointColor = Color.RED; //时针的颜色
-        private int mMinutePointColor = Color.BLACK;//分针的颜色
-        private int mSecondPointColor = Color.WHITE;//秒针的颜色
-        private float mPointRadius = 2;//指针圆角
-        private float mPointEndLength = 20;//指针末尾长度
 
         private void paintPointer(Canvas canvas, int hour, int minute, int second) {
             float radius = mMaxRadius - 32;
@@ -250,17 +359,6 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             canvas.restore();
         }
 
-        private boolean mRegisteredTimeZoneReceiver = false;
-
-        //调整时区，系统会广播此事件
-        private final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                Calendar.getInstance().setTimeZone(TimeZone.getDefault());
-                invalidate();
-            }
-        };
-
         private void registerReceiver() {
             if (mRegisteredTimeZoneReceiver) {
                 return;
@@ -278,101 +376,26 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             ZhipuWatchFace.this.unregisterReceiver(mTimeZoneReceiver);
         }
 
-        private final Handler mUpdateTimeHandler = new EngineHandler(this);
-
         private void updateTimer() {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
-            if (shouldTimerBeRunning()) {
+            if (this.shouldTimerBeRunning()) {
                 mUpdateTimeHandler.sendEmptyMessage(MSG_UPDATE_TIME);
             }
         }
 
         private void handleUpdateTimeMessage() {
             invalidate();
-            if (shouldTimerBeRunning()) {
+            if (this.shouldTimerBeRunning()) {
                 long timeMs = System.currentTimeMillis();
                 long delayMs = INTERACTIVE_UPDATE_RATE_MS - (timeMs % INTERACTIVE_UPDATE_RATE_MS);
+                Log.d(TAG, "handleUpdateTimeMessage, timeMs = " + timeMs
+                        + ", delayMs = " + delayMs + ", INTERACTIVE_UPDATE_RATE_MS = " + INTERACTIVE_UPDATE_RATE_MS);
                 mUpdateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
         }
 
         private boolean shouldTimerBeRunning() {
             return isVisible() && !mInAmbientMode;
-        }
-
-        @Override
-        public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-            super.onSurfaceChanged(holder, format, width, height);
-            Log.d(TAG, "---FaceEngine, onSurfaceChanged---");
-        }
-
-        @Override
-        public void onTimeTick() {
-            super.onTimeTick();
-            //微光模式下，系统每分钟调用一次该方法
-            Log.d(TAG, "---FaceEngine, onTimeTick---");
-            invalidate();
-        }
-
-        @Override
-        public void onAmbientModeChanged(boolean inAmbientMode) {
-            super.onAmbientModeChanged(inAmbientMode);
-            //模式改变时调用该方法：false，交互模式；true，微光模式
-            Log.d(TAG, "---FaceEngine, onAmbientModeChanged---, inAmbientMode = " + inAmbientMode);
-            mInAmbientMode = inAmbientMode;
-            if (mLowBitAmbient) {
-                boolean antiAlias = !inAmbientMode;
-                mPaintText.setAntiAlias(antiAlias);
-                mPaintPoint.setAntiAlias(antiAlias);
-                mPaintPointer.setAntiAlias(antiAlias);
-            }
-            updateTimer();
-        }
-
-        @Override
-        public void onVisibilityChanged(boolean visible) {
-            super.onVisibilityChanged(visible);
-            //false：表盘不可见，如按表冠键显示其它页面导致表盘界面不可见时会调用该方法
-            Log.d(TAG, "---FaceEngine, onVisibilityChanged---, visible = " + visible);
-            if (visible) {
-                registerReceiver();
-                /* Update time zone in case it changed while we weren't visible. */
-                Calendar.getInstance().setTimeZone(TimeZone.getDefault());
-                invalidate();
-            } else {
-                unregisterReceiver();
-            }
-
-            updateTimer();
-        }
-
-        private boolean mLowBitAmbient;
-
-        @Override
-        public void onPropertiesChanged(Bundle properties) {
-            super.onPropertiesChanged(properties);
-            mLowBitAmbient = properties.getBoolean(PROPERTY_LOW_BIT_AMBIENT, false);
-            boolean burnInProtection = properties.getBoolean(PROPERTY_BURN_IN_PROTECTION, false);
-            Log.d(TAG, "---FaceEngine, onPropertiesChanged---, lowBitAmbient = " + mLowBitAmbient
-                    + ", burnInProtection = " + burnInProtection);
-        }
-
-        @Override
-        public void onTapCommand(int tapType, int x, int y, long eventTime) {
-            switch (tapType) {
-                case TAP_TYPE_TOUCH:
-                    Log.d(TAG, "---FaceEngine, onTapCommand---, tapType = " + tapType + ", touch");
-                    break;
-                case TAP_TYPE_TOUCH_CANCEL:
-                    Log.d(TAG, "---FaceEngine, onTapCommand---, tapType = " + tapType + ", touch cancel");
-                    break;
-                case TAP_TYPE_TAP:
-                    Log.d(TAG, "---FaceEngine, onTapCommand---, tapType = " + tapType + ", tap");
-                    break;
-                default:
-                    break;
-            }
-            invalidate();
         }
     }
 
