@@ -10,6 +10,11 @@ import android.os.Bundle;
 import android.support.wearable.complications.ProviderUpdateRequester;
 import android.util.Log;
 
+/**
+ * Simple {@link BroadcastReceiver} subclass for asynchronously incrementing an integer for any
+ * complication id triggered via TapAction on complication. Also, provides static method to create a
+ * {@link PendingIntent} that triggers this receiver.
+ */
 public class ComplicationToggleReceiver extends BroadcastReceiver {
 
     private static final String EXTRA_PROVIDER_COMPONENT =

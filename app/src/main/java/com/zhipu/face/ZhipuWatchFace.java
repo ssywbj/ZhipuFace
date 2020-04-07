@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -13,12 +15,17 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.support.wearable.complications.ComplicationData;
+import android.support.wearable.complications.rendering.ComplicationDrawable;
 import android.support.wearable.watchface.CanvasWatchFaceService;
+import android.support.wearable.watchface.WatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
 import android.util.Log;
+import android.util.SparseArray;
 import android.view.SurfaceHolder;
 
 import androidx.annotation.NonNull;
+import androidx.palette.graphics.Palette;
 
 import java.lang.ref.WeakReference;
 import java.util.Calendar;
@@ -26,8 +33,20 @@ import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
 public class ZhipuWatchFace extends CanvasWatchFaceService {
-    private static final String TAG = ZhipuWatchFace.class.getSimpleName();
+    public static final String TAG = ZhipuWatchFace.class.getSimpleName();
     private static final int MSG_UPDATE_TIME = 0;
+
+    // Unique IDs for each complication. The settings activity that supports allowing users
+    // to select their complication data provider requires numbers to be >= 0.
+    private static final int BACKGROUND_COMPLICATION_ID = 0;
+
+    private static final int LEFT_COMPLICATION_ID = 100;
+    private static final int RIGHT_COMPLICATION_ID = 101;
+
+    // Background, Left and right complication IDs as array for Complication API.
+    private static final int[] COMPLICATION_IDS = {
+            BACKGROUND_COMPLICATION_ID, LEFT_COMPLICATION_ID, RIGHT_COMPLICATION_ID
+    };
 
     @Override
     public Engine onCreateEngine() {
@@ -56,7 +75,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
     /**
      * implement service callback methods
      * 表盘生命周期：onCreate->onSurfaceChanged->onDraw->onDestroy
-     * 启动表盘：onCreate->onSurfaceChanged->onDraw；更换表盘：onDestroy
+     * 启动表盘：onCreate->onSurfaceChanged->onDraw；更换表盘：onVisibilityChanged(false)->onDestroy
      */
     private class FaceEngine extends CanvasWatchFaceService.Engine {
         private final long INTERACTIVE_UPDATE_RATE_MS = TimeUnit.SECONDS.toMillis(1);
@@ -98,6 +117,19 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
         };
         private boolean mRegisteredTimeZoneReceiver = false;
 
+        private final BroadcastReceiver mBatteryReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (Intent.ACTION_BATTERY_CHANGED.equals(intent.getAction())) {
+                    int level = intent.getIntExtra("level", 0);//当前电量
+                    int total = intent.getIntExtra("scale", 100);//总电量
+                    int percentage = (level * 100) / total;
+                    Log.d(TAG, "battery, level = " + level + ", total = " + total + ", percentage = " + percentage + "%");
+                }
+            }
+        };
+        private boolean mRegisteredBatteryReceiver = false;
+
         @Override
         public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
@@ -105,15 +137,29 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
             //setAcceptsTapEvents(true)：注册onTapCommand(int, int, int, long)监听
             setWatchFaceStyle(new WatchFaceStyle.Builder(ZhipuWatchFace.this).setAcceptsTapEvents(true)
-                    .setAccentColor(Color.WHITE).setShowUnreadCountIndicator(true).build());
+                    .setAccentColor(Color.WHITE).setHideNotificationIndicator(true)./*setShowUnreadCountIndicator(true).*/build());
 
             this.initPaint();
+
+            // Set defaults for colors
+            mWatchHandHighlightColor = Color.RED;
+
+            this.initializeComplicationsAndBackground();
         }
+
+        private Bitmap mBackgroundBitmap;
 
         @Override
         public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
             super.onSurfaceChanged(holder, format, width, height);
             Log.d(TAG, "onSurfaceChanged, format = " + format + ", width = " + width + ", height = " + height);
+
+            /* Scale loaded background image (more efficient) if surface dimensions change. */
+            float scale = ((float) width) / (float) mBackgroundBitmap.getWidth();
+
+            mBackgroundBitmap = Bitmap.createScaledBitmap(mBackgroundBitmap,
+                    (int) (mBackgroundBitmap.getWidth() * scale),
+                    (int) (mBackgroundBitmap.getHeight() * scale), true);
         }
 
         @Override
@@ -146,6 +192,12 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             super.onAmbientModeChanged(inAmbientMode);
             Log.d(TAG, "onAmbientModeChanged, the wearable switched between modes, inAmbientMode = " + inAmbientMode);
             mInAmbientMode = inAmbientMode;
+            if (mInAmbientMode) {
+                this.unregisterBatteryReceiver();
+            } else {
+                this.registerBatteryReceiver();
+            }
+
             if (mLowBitAmbient) {
                 boolean antiAlias = !inAmbientMode;
                 mPaintText.setAntiAlias(antiAlias);
@@ -171,6 +223,8 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                 invalidate();
             } else {
                 this.unregisterReceiver();
+
+                this.unregisterBatteryReceiver();
             }
 
             this.updateTimer();
@@ -180,7 +234,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
         public void onDraw(Canvas canvas, Rect bounds) {
             int width = canvas.getWidth();
             int height = canvas.getHeight();
-            Log.d(TAG, "onDraw, draw watch face, width = " + width + ", height = " + height);
+            //Log.d(TAG, "onDraw, draw watch face, width = " + width + ", height = " + height);
 
             int hour = Calendar.getInstance().get(Calendar.HOUR);//时
             int minute = Calendar.getInstance().get(Calendar.MINUTE);//分
@@ -224,6 +278,138 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                 mPaintText.setTypeface(Typeface.defaultFromStyle(Typeface.ITALIC));
                 canvas.drawText(text, (width - mPaintText.measureText(text)) / 2, textPaintHeight, mPaintText);
             }
+
+            drawComplications(canvas, System.currentTimeMillis());
+        }
+
+        /* Maps active complication ids to the data for that complication. Note: Data will only be
+         * present if the user has chosen a provider via the settings activity for the watch face.
+         */
+        private SparseArray<ComplicationData> mActiveComplicationDataSparseArray;
+        /* Maps complication ids to corresponding ComplicationDrawable that renders the
+         * the complication data on the watch face.
+         */
+        private SparseArray<ComplicationDrawable> mComplicationDrawableSparseArray;
+
+        private int mWatchHandHighlightColor;
+
+        /*
+         * Called when there is updated data for a complication id.
+         */
+        @Override
+        public void onComplicationDataUpdate(int watchFaceComplicationId, ComplicationData data) {
+            super.onComplicationDataUpdate(watchFaceComplicationId, data);
+            Log.d(TAG, "onComplicationDataUpdate, watchFaceComplicationId = " + watchFaceComplicationId + ", data = " + data);
+
+            // Adds/updates active complication data in the array.
+            mActiveComplicationDataSparseArray.put(watchFaceComplicationId, data);
+
+            // Updates correct ComplicationDrawable with updated data.
+            ComplicationDrawable complicationDrawable =
+                    mComplicationDrawableSparseArray.get(watchFaceComplicationId);
+            complicationDrawable.setComplicationData(data);
+
+            invalidate();
+        }
+
+        private boolean mMuteMode;
+
+        @Override
+        public void onInterruptionFilterChanged(int interruptionFilter) {
+            super.onInterruptionFilterChanged(interruptionFilter);
+            boolean inMuteMode = (interruptionFilter == WatchFaceService.INTERRUPTION_FILTER_NONE);
+            Log.d(TAG, "onInterruptionFilterChanged, inMuteMode: " + inMuteMode);
+
+            /* Dim display in mute mode. */
+            /*if (mMuteMode != inMuteMode) {
+                mMuteMode = inMuteMode;
+                mHourPaint.setAlpha(inMuteMode ? 100 : 255);
+                mMinutePaint.setAlpha(inMuteMode ? 100 : 255);
+                mSecondPaint.setAlpha(inMuteMode ? 80 : 255);
+                invalidate();
+            }*/
+        }
+
+        @Override
+        public void onUnreadCountChanged(int count) {
+            Log.d(TAG, "onUnreadCountChanged, count: " + count);
+        }
+
+        private void drawComplications(Canvas canvas, long currentTimeMillis) {
+            int complicationId;
+            ComplicationDrawable complicationDrawable;
+
+            for (int i = 0; i < COMPLICATION_IDS.length; i++) {
+                complicationId = COMPLICATION_IDS[i];
+                complicationDrawable = mComplicationDrawableSparseArray.get(complicationId);
+
+                complicationDrawable.draw(canvas, currentTimeMillis);
+            }
+        }
+
+        private void initializeComplicationsAndBackground() {
+            Log.d(TAG, "initializeComplications()");
+
+            // Initialize background color (in case background complication is inactive).
+            /*mBackgroundPaint = new Paint();
+            mBackgroundPaint.setColor(mBackgroundColor);*/
+
+            mActiveComplicationDataSparseArray = new SparseArray<>(COMPLICATION_IDS.length);
+
+            // Creates a ComplicationDrawable for each location where the user can render a
+            // complication on the watch face. In this watch face, we create one for left, right,
+            // and background, but you could add many more.
+            ComplicationDrawable leftComplicationDrawable =
+                    new ComplicationDrawable(getApplicationContext());
+
+            ComplicationDrawable rightComplicationDrawable =
+                    new ComplicationDrawable(getApplicationContext());
+
+            ComplicationDrawable backgroundComplicationDrawable =
+                    new ComplicationDrawable(getApplicationContext());
+
+            // Adds new complications to a SparseArray to simplify setting styles and ambient
+            // properties for all complications, i.e., iterate over them all.
+            mComplicationDrawableSparseArray = new SparseArray<>(COMPLICATION_IDS.length);
+
+            mComplicationDrawableSparseArray.put(LEFT_COMPLICATION_ID, leftComplicationDrawable);
+            mComplicationDrawableSparseArray.put(RIGHT_COMPLICATION_ID, rightComplicationDrawable);
+            mComplicationDrawableSparseArray.put(
+                    BACKGROUND_COMPLICATION_ID, backgroundComplicationDrawable);
+
+            setComplicationsActiveAndAmbientColors(mWatchHandHighlightColor);
+            setActiveComplications(COMPLICATION_IDS);
+        }
+
+        /* Sets active/ambient mode colors for all complications.
+         *
+         * Note: With the rest of the watch face, we update the paint colors based on
+         * ambient/active mode callbacks, but because the ComplicationDrawable handles
+         * the active/ambient colors, we only set the colors twice. Once at initialization and
+         * again if the user changes the highlight color via AnalogComplicationConfigActivity.
+         */
+        private void setComplicationsActiveAndAmbientColors(int primaryComplicationColor) {
+            int complicationId;
+            ComplicationDrawable complicationDrawable;
+
+            for (int i = 0; i < COMPLICATION_IDS.length; i++) {
+                complicationId = COMPLICATION_IDS[i];
+                complicationDrawable = mComplicationDrawableSparseArray.get(complicationId);
+
+                if (complicationId == BACKGROUND_COMPLICATION_ID) {
+                    // It helps for the background color to be black in case the image used for the
+                    // watch face's background takes some time to load.
+                    complicationDrawable.setBackgroundColorActive(Color.BLACK);
+                } else {
+                    // Active mode colors.
+                    complicationDrawable.setBorderColorActive(primaryComplicationColor);
+                    complicationDrawable.setRangedValuePrimaryColorActive(primaryComplicationColor);
+
+                    // Ambient mode colors.
+                    complicationDrawable.setBorderColorAmbient(Color.WHITE);
+                    complicationDrawable.setRangedValuePrimaryColorAmbient(Color.WHITE);
+                }
+            }
         }
 
         @Override
@@ -249,9 +435,9 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
         @Override
         public void onDestroy() {
+            super.onDestroy();
             Log.d(TAG, "onDestroy");
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
-            super.onDestroy();
         }
 
         private String addZero(int number) {
@@ -276,6 +462,21 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             mPaintPointer = new Paint();
             mPaintPointer.setAntiAlias(true);
             mPaintPointer.setDither(true);
+
+            mBackgroundBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.bg);
+            /* Extracts colors from background image to improve watchface style. */
+            Palette.from(mBackgroundBitmap).generate(new Palette.PaletteAsyncListener() {
+                @Override
+                public void onGenerated(Palette palette) {
+                    if (palette != null) {
+                        /*mWatchHandHighlightColor = palette.getVibrantColor(Color.RED);
+                        mWatchHandColor = palette.getLightVibrantColor(Color.WHITE);
+                        mWatchHandShadowColor = palette.getDarkMutedColor(Color.BLACK);
+                        updateWatchHandStyle();*/
+                    }
+                }
+            });
+
         }
 
         private void paintScaleNumber(Canvas canvas) {
@@ -376,6 +577,23 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             ZhipuWatchFace.this.unregisterReceiver(mTimeZoneReceiver);
         }
 
+        private void registerBatteryReceiver() {
+            if (mRegisteredBatteryReceiver) {
+                return;
+            }
+            mRegisteredBatteryReceiver = true;
+            IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            ZhipuWatchFace.this.registerReceiver(mBatteryReceiver, filter);
+        }
+
+        private void unregisterBatteryReceiver() {
+            if (!mRegisteredBatteryReceiver) {
+                return;
+            }
+            mRegisteredBatteryReceiver = false;
+            ZhipuWatchFace.this.unregisterReceiver(mBatteryReceiver);
+        }
+
         private void updateTimer() {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
             if (this.shouldTimerBeRunning()) {
@@ -388,8 +606,8 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             if (this.shouldTimerBeRunning()) {
                 long timeMs = System.currentTimeMillis();
                 long delayMs = INTERACTIVE_UPDATE_RATE_MS - (timeMs % INTERACTIVE_UPDATE_RATE_MS);
-                Log.d(TAG, "handleUpdateTimeMessage, timeMs = " + timeMs
-                        + ", delayMs = " + delayMs + ", INTERACTIVE_UPDATE_RATE_MS = " + INTERACTIVE_UPDATE_RATE_MS);
+                /*Log.d(TAG, "handleUpdateTimeMessage, timeMs = " + timeMs
+                        + ", delayMs = " + delayMs + ", INTERACTIVE_UPDATE_RATE_MS = " + INTERACTIVE_UPDATE_RATE_MS);*/
                 mUpdateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
         }
