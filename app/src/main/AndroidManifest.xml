@@ -54,6 +54,19 @@
             </intent-filter>
         </service>
 
+        <activity android:name="android.support.wearable.complications.ComplicationHelperActivity" />
+        <activity
+            android:name=".config.AnalogComplicationConfigActivity"
+            android:label="@string/zhipu_analog_complication_config">
+            <intent-filter>
+                <action android:name="com.zhipu.watchface.CONFIG_COMPLICATION_SIMPLE" />
+
+
+                <category android:name="com.google.android.wearable.watchface.category.WEARABLE_CONFIGURATION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".MyWatchFace"
             android:label="@string/my_analog_name"
@@ -108,6 +121,7 @@
         </service>
         <receiver android:name=".ComplicationToggleReceiver"/>
 
+        <activity android:name=".config.ColorSelectionActivity" />
     </application>
 
 </manifest>

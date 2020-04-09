@@ -1,9 +1,11 @@
 package com.zhipu.face;
 
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -27,6 +29,8 @@ import android.view.SurfaceHolder;
 import androidx.annotation.NonNull;
 import androidx.palette.graphics.Palette;
 
+import com.zhipu.face.config.AnalogComplicationConfigRecyclerViewAdapter;
+
 import java.lang.ref.WeakReference;
 import java.util.Calendar;
 import java.util.TimeZone;
@@ -42,10 +46,77 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
     private static final int LEFT_COMPLICATION_ID = 100;
     private static final int RIGHT_COMPLICATION_ID = 101;
+    private static final int BOTTOM_COMPLICATION_ID = 102;
 
     // Background, Left and right complication IDs as array for Complication API.
     private static final int[] COMPLICATION_IDS = {
-            BACKGROUND_COMPLICATION_ID, LEFT_COMPLICATION_ID, RIGHT_COMPLICATION_ID
+            BACKGROUND_COMPLICATION_ID, LEFT_COMPLICATION_ID, RIGHT_COMPLICATION_ID, BOTTOM_COMPLICATION_ID
+    };
+
+    // Used by {@link AnalogComplicationConfigRecyclerViewAdapter} to check if complication location
+    // is supported in settings config activity.
+    public static int getComplicationId(
+            AnalogComplicationConfigRecyclerViewAdapter.ComplicationLocation complicationLocation) {
+        // Add any other supported locations here.
+        switch (complicationLocation) {
+            case BACKGROUND:
+                return BACKGROUND_COMPLICATION_ID;
+            case LEFT:
+                return LEFT_COMPLICATION_ID;
+            case RIGHT:
+                return RIGHT_COMPLICATION_ID;
+            case BOTTOM:
+                return BOTTOM_COMPLICATION_ID;
+            default:
+                return -1;
+        }
+    }
+
+    // Used by {@link AnalogComplicationConfigRecyclerViewAdapter} to retrieve all complication ids.
+    public static int[] getComplicationIds() {
+        return COMPLICATION_IDS;
+    }
+
+    // Used by {@link AnalogComplicationConfigRecyclerViewAdapter} to see which complication types
+    // are supported in the settings config activity.
+    public static int[] getSupportedComplicationTypes(
+            AnalogComplicationConfigRecyclerViewAdapter.ComplicationLocation complicationLocation) {
+        // Add any other supported locations here.
+        switch (complicationLocation) {
+            case BACKGROUND:
+                return COMPLICATION_SUPPORTED_TYPES[0];
+            case LEFT:
+                return COMPLICATION_SUPPORTED_TYPES[1];
+            case RIGHT:
+                return COMPLICATION_SUPPORTED_TYPES[2];
+            case BOTTOM:
+                return COMPLICATION_SUPPORTED_TYPES[3];
+            default:
+                return new int[]{};
+        }
+    }
+
+    // Left and right dial supported types.
+    private static final int[][] COMPLICATION_SUPPORTED_TYPES = {
+            {ComplicationData.TYPE_LARGE_IMAGE},
+            {
+                    ComplicationData.TYPE_RANGED_VALUE,
+                    ComplicationData.TYPE_ICON,
+                    ComplicationData.TYPE_SHORT_TEXT,
+                    ComplicationData.TYPE_SMALL_IMAGE
+            },
+            {
+                    ComplicationData.TYPE_RANGED_VALUE,
+                    ComplicationData.TYPE_ICON,
+                    ComplicationData.TYPE_SHORT_TEXT,
+                    ComplicationData.TYPE_SMALL_IMAGE
+            },
+            {
+                    ComplicationData.TYPE_RANGED_VALUE,
+                    ComplicationData.TYPE_ICON,
+                    ComplicationData.TYPE_SHORT_TEXT,
+                    ComplicationData.TYPE_SMALL_IMAGE
+            }
     };
 
     @Override
@@ -100,8 +171,11 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
         private float mPointRadius = 2;//指针圆角
         private float mPointEndLength = 20;//指针末尾长度
 
-        private boolean mLowBitAmbient;
-        private boolean mInAmbientMode;
+        private boolean mLowBitAmbient, mBurnInProtection, mInAmbientMode;
+
+        // Used to pull user's preferences for background color, highlight color, and visual
+        // indicating there are unread notifications.
+        SharedPreferences mSharedPref;
 
         private final Handler mUpdateTimeHandler = new EngineHandler(this);
 
@@ -139,12 +213,38 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             setWatchFaceStyle(new WatchFaceStyle.Builder(ZhipuWatchFace.this).setAcceptsTapEvents(true)
                     .setAccentColor(Color.WHITE).setHideNotificationIndicator(true)./*setShowUnreadCountIndicator(true).*/build());
 
+            // Used throughout watch face to pull user's preferences.
+            Context context = getApplicationContext();
+            mSharedPref =
+                    context.getSharedPreferences(
+                            getString(R.string.analog_complication_preference_file_key),
+                            Context.MODE_PRIVATE);
+
             this.initPaint();
 
             // Set defaults for colors
             mWatchHandHighlightColor = Color.RED;
 
             this.initializeComplicationsAndBackground();
+
+            /*int[] supportedTypes =
+                    ZhipuWatchFace.getSupportedComplicationTypes(
+                            ComplicationLocation.BACKGROUND);*/
+
+            ComponentName watchFace =
+                    new ComponentName(getApplicationContext(), ZhipuWatchFace.class);
+
+            /*currentActivity.startActivityForResult(
+                    ComplicationHelperActivity.createProviderChooserHelperIntent(
+                            currentActivity,
+                            watchFace,
+                            mSelectedComplicationId,
+                            supportedTypes),
+                    AnalogComplicationConfigActivity.COMPLICATION_CONFIG_REQUEST_CODE);*/
+
+            /*startActivity(ComplicationHelperActivity
+                    .createPermissionRequestHelperIntent(getApplicationContext(), watchFace));*/
+            //ComplicationHelperActivity.createProviderChooserHelperIntent(Context, ComponentName, int, int...)
         }
 
         private Bitmap mBackgroundBitmap;
@@ -160,15 +260,82 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             mBackgroundBitmap = Bitmap.createScaledBitmap(mBackgroundBitmap,
                     (int) (mBackgroundBitmap.getWidth() * scale),
                     (int) (mBackgroundBitmap.getHeight() * scale), true);
+
+            /*
+             * Calculates location bounds for right and left circular complications. Please note,
+             * we are not demonstrating a long text complication in this watch face.
+             *
+             * We suggest using at least 1/4 of the screen width for circular (or squared)
+             * complications and 2/3 of the screen width for wide rectangular complications for
+             * better readability.
+             */
+
+            // For most Wear devices, width and height are the same, so we just chose one (width).
+            int sizeOfComplication = width / 4;
+            int midpointOfScreen = width / 2;
+            int horizontalOffset = (midpointOfScreen - sizeOfComplication) / 2;
+            int verticalOffset = midpointOfScreen - (sizeOfComplication / 2);
+
+            Rect leftBounds =
+                    // Left, Top, Right, Bottom
+                    new Rect(
+                            horizontalOffset,
+                            verticalOffset,
+                            (horizontalOffset + sizeOfComplication),
+                            (verticalOffset + sizeOfComplication));
+            ComplicationDrawable leftComplicationDrawable =
+                    mComplicationDrawableSparseArray.get(LEFT_COMPLICATION_ID);
+            leftComplicationDrawable.setBounds(leftBounds);
+
+            Rect rightBounds =
+                    // Left, Top, Right, Bottom
+                    new Rect(
+                            (midpointOfScreen + horizontalOffset),
+                            verticalOffset,
+                            (midpointOfScreen + horizontalOffset + sizeOfComplication),
+                            (verticalOffset + sizeOfComplication));
+            ComplicationDrawable rightComplicationDrawable =
+                    mComplicationDrawableSparseArray.get(RIGHT_COMPLICATION_ID);
+            rightComplicationDrawable.setBounds(rightBounds);
+
+            Rect bottomBounds =
+                    // Left, Top, Right, Bottom
+                    new Rect(
+                            (midpointOfScreen + horizontalOffset),
+                            verticalOffset + sizeOfComplication,
+                            (midpointOfScreen + horizontalOffset + sizeOfComplication),
+                            (verticalOffset + sizeOfComplication + sizeOfComplication));
+            ComplicationDrawable bottomComplicationDrawable =
+                    mComplicationDrawableSparseArray.get(BOTTOM_COMPLICATION_ID);
+            bottomComplicationDrawable.setBounds(bottomBounds);
+
+            Rect screenForBackgroundBound =
+                    // Left, Top, Right, Bottom
+                    new Rect(0, 0, width, height);
+
+            ComplicationDrawable backgroundComplicationDrawable =
+                    mComplicationDrawableSparseArray.get(BACKGROUND_COMPLICATION_ID);
+            backgroundComplicationDrawable.setBounds(screenForBackgroundBound);
         }
 
         @Override
         public void onPropertiesChanged(Bundle properties) {
             super.onPropertiesChanged(properties);
             mLowBitAmbient = properties.getBoolean(PROPERTY_LOW_BIT_AMBIENT, false);
-            boolean burnInProtection = properties.getBoolean(PROPERTY_BURN_IN_PROTECTION, false);
+            mBurnInProtection = properties.getBoolean(PROPERTY_BURN_IN_PROTECTION, false);
             Log.d(TAG, "onPropertiesChanged, get device features (burn-in, low-bit ambient), " +
-                    "lowBitAmbient = " + mLowBitAmbient + ", burnInProtection = " + burnInProtection);
+                    "lowBitAmbient = " + mLowBitAmbient + ", burnInProtection = " + mBurnInProtection);
+
+            // Updates complications to properly render in ambient mode based on the
+            // screen's capabilities.
+            ComplicationDrawable complicationDrawable;
+
+            for (int complicationId : COMPLICATION_IDS) {
+                complicationDrawable = mComplicationDrawableSparseArray.get(complicationId);
+
+                complicationDrawable.setLowBitAmbient(mLowBitAmbient);
+                complicationDrawable.setBurnInProtection(mBurnInProtection);
+            }
         }
 
         /**
@@ -234,7 +401,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
         public void onDraw(Canvas canvas, Rect bounds) {
             int width = canvas.getWidth();
             int height = canvas.getHeight();
-            //Log.d(TAG, "onDraw, draw watch face, width = " + width + ", height = " + height);
+            Log.d(TAG, "onDraw, draw watch face, width = " + width + ", height = " + height);
 
             int hour = Calendar.getInstance().get(Calendar.HOUR);//时
             int minute = Calendar.getInstance().get(Calendar.MINUTE);//分
@@ -279,7 +446,23 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                 canvas.drawText(text, (width - mPaintText.measureText(text)) / 2, textPaintHeight, mPaintText);
             }
 
-            drawComplications(canvas, System.currentTimeMillis());
+            this.drawComplications(canvas, System.currentTimeMillis());
+            this.drawUnreadNotificationIcon(canvas);
+        }
+
+        private void drawUnreadNotificationIcon(Canvas canvas) {
+            int width = canvas.getWidth();
+            int height = canvas.getHeight();
+
+            canvas.drawCircle(width / 2, height - 40, 10, mPaintPoint);
+
+            /*
+             * Ensure center highlight circle is only drawn in interactive mode. This ensures
+             * we don't burn the screen with a solid circle in ambient mode.
+             */
+            if (!mInAmbientMode) {
+                canvas.drawCircle(width / 2, height - 40, 4, mPaintPointer);
+            }
         }
 
         /* Maps active complication ids to the data for that complication. Note: Data will only be
@@ -336,23 +519,31 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
         }
 
         private void drawComplications(Canvas canvas, long currentTimeMillis) {
-            int complicationId;
             ComplicationDrawable complicationDrawable;
+            for (int complicationId : COMPLICATION_IDS) {
+                complicationDrawable = mComplicationDrawableSparseArray.get(complicationId);
+
+                complicationDrawable.draw(canvas, currentTimeMillis);
+            }
+            /*int complicationId;
 
             for (int i = 0; i < COMPLICATION_IDS.length; i++) {
                 complicationId = COMPLICATION_IDS[i];
                 complicationDrawable = mComplicationDrawableSparseArray.get(complicationId);
 
                 complicationDrawable.draw(canvas, currentTimeMillis);
-            }
+            }*/
         }
+
+        private Paint mBackgroundPaint;
+        private int mBackgroundColor = Color.BLACK;
 
         private void initializeComplicationsAndBackground() {
             Log.d(TAG, "initializeComplications()");
 
             // Initialize background color (in case background complication is inactive).
-            /*mBackgroundPaint = new Paint();
-            mBackgroundPaint.setColor(mBackgroundColor);*/
+            mBackgroundPaint = new Paint();
+            mBackgroundPaint.setColor(mBackgroundColor);
 
             mActiveComplicationDataSparseArray = new SparseArray<>(COMPLICATION_IDS.length);
 
@@ -365,6 +556,9 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             ComplicationDrawable rightComplicationDrawable =
                     new ComplicationDrawable(getApplicationContext());
 
+            ComplicationDrawable bottomComplicationDrawable =
+                    new ComplicationDrawable(getApplicationContext());
+
             ComplicationDrawable backgroundComplicationDrawable =
                     new ComplicationDrawable(getApplicationContext());
 
@@ -374,6 +568,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
             mComplicationDrawableSparseArray.put(LEFT_COMPLICATION_ID, leftComplicationDrawable);
             mComplicationDrawableSparseArray.put(RIGHT_COMPLICATION_ID, rightComplicationDrawable);
+            mComplicationDrawableSparseArray.put(BOTTOM_COMPLICATION_ID, bottomComplicationDrawable);
             mComplicationDrawableSparseArray.put(
                     BACKGROUND_COMPLICATION_ID, backgroundComplicationDrawable);
 
@@ -425,6 +620,20 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                     break;
                 case TAP_TYPE_TAP:
                     Log.d(TAG, onTapCommand + ", tap");
+                    // If your background complication is the first item in your array, you need
+                    // to walk backward through the array to make sure the tap isn't for a
+                    // complication above the background complication.
+                    for (int i = COMPLICATION_IDS.length - 1; i >= 0; i--) {
+                        int complicationId = COMPLICATION_IDS[i];
+                        ComplicationDrawable complicationDrawable =
+                                mComplicationDrawableSparseArray.get(complicationId);
+
+                        boolean successfulTap = complicationDrawable.onTap(x, y);
+
+                        if (successfulTap) {
+                            return;
+                        }
+                    }
                     break;
                 default:
                     break;
