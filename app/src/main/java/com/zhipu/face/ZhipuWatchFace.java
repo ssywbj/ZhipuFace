@@ -18,6 +18,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.support.wearable.complications.ComplicationData;
+import android.support.wearable.complications.SystemProviders;
 import android.support.wearable.complications.rendering.ComplicationDrawable;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceService;
@@ -212,7 +213,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
             //setAcceptsTapEvents(true)：注册onTapCommand(int, int, int, long)监听
             setWatchFaceStyle(new WatchFaceStyle.Builder(ZhipuWatchFace.this).setAcceptsTapEvents(true)
-                    .setAccentColor(Color.RED).setHideNotificationIndicator(true)./*setShowUnreadCountIndicator(true).*/build());
+                    /*.setAccentColor(Color.RED).setHideNotificationIndicator(true)*/.setShowUnreadCountIndicator(true).build());
 
             // Used throughout watch face to pull user's preferences.
             mContext = getApplicationContext();
@@ -226,24 +227,13 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
             this.initializeComplicationsAndBackground();
 
-            /*int[] supportedTypes =
-                    ZhipuWatchFace.getSupportedComplicationTypes(
-                            ComplicationLocation.BACKGROUND);*/
-
-            ComponentName watchFace =
-                    new ComponentName(getApplicationContext(), ZhipuWatchFace.class);
-
-            /*currentActivity.startActivityForResult(
-                    ComplicationHelperActivity.createProviderChooserHelperIntent(
-                            currentActivity,
-                            watchFace,
-                            mSelectedComplicationId,
-                            supportedTypes),
-                    AnalogComplicationConfigActivity.COMPLICATION_CONFIG_REQUEST_CODE);*/
-
-            /*startActivity(ComplicationHelperActivity
-                    .createPermissionRequestHelperIntent(getApplicationContext(), watchFace));*/
-            //ComplicationHelperActivity.createProviderChooserHelperIntent(Context, ComponentName, int, int...)
+            setDefaultSystemComplicationProvider(LEFT_COMPLICATION_ID, SystemProviders.WATCH_BATTERY, ComplicationData.TYPE_SHORT_TEXT);
+            setDefaultSystemComplicationProvider(BOTTOM_COMPLICATION_ID, SystemProviders.STEP_COUNT,
+                    ComplicationData.TYPE_SHORT_TEXT);
+            /*setDefaultSystemComplicationProvider(RIGHT_COMPLICATION_ID, SystemProviders.DATE,
+                    ComplicationData.TYPE_SHORT_TEXT);*/
+            setDefaultComplicationProvider(RIGHT_COMPLICATION_ID, new ComponentName(mContext, DataService.class)
+                    , ComplicationData.TYPE_SHORT_TEXT);
         }
 
         private Bitmap mBackgroundBitmap;
@@ -289,7 +279,8 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                     (midpointOfScreen + offset + sizeOfComplication), (verticalOffset + sizeOfComplication));
             ComplicationDrawable rightComplicationDrawable = mComplicationDrawableSparseArray.get(RIGHT_COMPLICATION_ID);
             this.setComplicationDrawable(rightBounds, rightComplicationDrawable);
-            rightComplicationDrawable.setBorderColorActive(Color.TRANSPARENT);
+            //rightComplicationDrawable.setBorderColorActive(Color.TRANSPARENT);
+            rightComplicationDrawable.setHighlightDuration(0);
 
             Rect bottomBounds = new Rect((midpointOfScreen - sizeOfComplication / 2), (int) mCenterY + offset,
                     (midpointOfScreen + +sizeOfComplication / 2), ((int) mCenterY + offset + sizeOfComplication));
