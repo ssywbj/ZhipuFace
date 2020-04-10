@@ -27,6 +27,7 @@ import android.util.SparseArray;
 import android.view.SurfaceHolder;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.palette.graphics.Palette;
 
 import com.zhipu.face.config.AnalogComplicationConfigRecyclerViewAdapter;
@@ -121,7 +122,6 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
     @Override
     public Engine onCreateEngine() {
-        Log.d(TAG, "provide watch face implementation");
         return new FaceEngine();
     }
 
@@ -173,6 +173,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
         private boolean mLowBitAmbient, mBurnInProtection, mInAmbientMode;
 
+        private Context mContext;
         // Used to pull user's preferences for background color, highlight color, and visual
         // indicating there are unread notifications.
         SharedPreferences mSharedPref;
@@ -211,14 +212,12 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
             //setAcceptsTapEvents(true)：注册onTapCommand(int, int, int, long)监听
             setWatchFaceStyle(new WatchFaceStyle.Builder(ZhipuWatchFace.this).setAcceptsTapEvents(true)
-                    .setAccentColor(Color.WHITE).setHideNotificationIndicator(true)./*setShowUnreadCountIndicator(true).*/build());
+                    .setAccentColor(Color.RED).setHideNotificationIndicator(true)./*setShowUnreadCountIndicator(true).*/build());
 
             // Used throughout watch face to pull user's preferences.
-            Context context = getApplicationContext();
-            mSharedPref =
-                    context.getSharedPreferences(
-                            getString(R.string.analog_complication_preference_file_key),
-                            Context.MODE_PRIVATE);
+            mContext = getApplicationContext();
+            mSharedPref = mContext.getSharedPreferences(
+                            getString(R.string.analog_complication_preference_file_key), Context.MODE_PRIVATE);
 
             this.initPaint();
 
@@ -253,6 +252,9 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
         public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
             super.onSurfaceChanged(holder, format, width, height);
             Log.d(TAG, "onSurfaceChanged, format = " + format + ", width = " + width + ", height = " + height);
+            mCenterX = 1.0f * width / 2;//圆心X坐标
+            mCenterY = 1.0f * height / 2 - 28;//圆心Y坐标
+            mMaxRadius = Math.min(mCenterX, mCenterY);
 
             /* Scale loaded background image (more efficient) if surface dimensions change. */
             float scale = ((float) width) / (float) mBackgroundBitmap.getWidth();
@@ -271,51 +273,33 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
              */
 
             // For most Wear devices, width and height are the same, so we just chose one (width).
-            int sizeOfComplication = width / 4;
-            int midpointOfScreen = width / 2;
-            int horizontalOffset = (midpointOfScreen - sizeOfComplication) / 2;
-            int verticalOffset = midpointOfScreen - (sizeOfComplication / 2);
+            int offset = 30;
+            int sizeOfComplication = width / 4 - 15;
+            int midpointOfScreen = (int) mCenterX;
+            int verticalOffset = (int) (mCenterY - (sizeOfComplication / 2));
 
-            Rect leftBounds =
-                    // Left, Top, Right, Bottom
-                    new Rect(
-                            horizontalOffset,
-                            verticalOffset,
-                            (horizontalOffset + sizeOfComplication),
-                            (verticalOffset + sizeOfComplication));
-            ComplicationDrawable leftComplicationDrawable =
-                    mComplicationDrawableSparseArray.get(LEFT_COMPLICATION_ID);
-            leftComplicationDrawable.setBounds(leftBounds);
+            // Left, Top, Right, Bottom
+            Rect leftBounds = new Rect(midpointOfScreen - offset - sizeOfComplication, verticalOffset,
+                    (midpointOfScreen - offset), (verticalOffset + sizeOfComplication));
+            ComplicationDrawable leftComplicationDrawable = mComplicationDrawableSparseArray.get(LEFT_COMPLICATION_ID);
+            this.setComplicationDrawable(leftBounds, leftComplicationDrawable);
+            leftComplicationDrawable.setRangedValueProgressHidden(true);
 
-            Rect rightBounds =
-                    // Left, Top, Right, Bottom
-                    new Rect(
-                            (midpointOfScreen + horizontalOffset),
-                            verticalOffset,
-                            (midpointOfScreen + horizontalOffset + sizeOfComplication),
-                            (verticalOffset + sizeOfComplication));
-            ComplicationDrawable rightComplicationDrawable =
-                    mComplicationDrawableSparseArray.get(RIGHT_COMPLICATION_ID);
-            rightComplicationDrawable.setBounds(rightBounds);
+            Rect rightBounds = new Rect((midpointOfScreen + offset), verticalOffset,
+                    (midpointOfScreen + offset + sizeOfComplication), (verticalOffset + sizeOfComplication));
+            ComplicationDrawable rightComplicationDrawable = mComplicationDrawableSparseArray.get(RIGHT_COMPLICATION_ID);
+            this.setComplicationDrawable(rightBounds, rightComplicationDrawable);
+            rightComplicationDrawable.setBorderColorActive(Color.TRANSPARENT);
 
-            Rect bottomBounds =
-                    // Left, Top, Right, Bottom
-                    new Rect(
-                            (midpointOfScreen + horizontalOffset),
-                            verticalOffset + sizeOfComplication,
-                            (midpointOfScreen + horizontalOffset + sizeOfComplication),
-                            (verticalOffset + sizeOfComplication + sizeOfComplication));
-            ComplicationDrawable bottomComplicationDrawable =
-                    mComplicationDrawableSparseArray.get(BOTTOM_COMPLICATION_ID);
-            bottomComplicationDrawable.setBounds(bottomBounds);
-
-            Rect screenForBackgroundBound =
-                    // Left, Top, Right, Bottom
-                    new Rect(0, 0, width, height);
+            Rect bottomBounds = new Rect((midpointOfScreen - sizeOfComplication / 2), (int) mCenterY + offset,
+                    (midpointOfScreen + +sizeOfComplication / 2), ((int) mCenterY + offset + sizeOfComplication));
+            ComplicationDrawable bottomComplicationDrawable = mComplicationDrawableSparseArray.get(BOTTOM_COMPLICATION_ID);
+            this.setComplicationDrawable(bottomBounds, bottomComplicationDrawable);
+            bottomComplicationDrawable.setRangedValueSecondaryColorActive(Color.WHITE);
 
             ComplicationDrawable backgroundComplicationDrawable =
                     mComplicationDrawableSparseArray.get(BACKGROUND_COMPLICATION_ID);
-            backgroundComplicationDrawable.setBounds(screenForBackgroundBound);
+            backgroundComplicationDrawable.setBounds(new Rect(0, 0, width, height));
         }
 
         @Override
@@ -411,7 +395,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             String text = "zhipu";
             float textPaintHeight;
             if (mInAmbientMode) {
-                canvas.drawColor(Color.parseColor("#666666"));//画面背景
+                canvas.drawColor(ContextCompat.getColor(mContext, R.color.zhipu_watchface_ambient_mode));//画面背景
 
                 mPaintText.setTextSize(64f);
                 mPaintText.setTypeface(Typeface.defaultFromStyle(Typeface.NORMAL));
@@ -430,13 +414,9 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                 textPaintHeight = (height + 1.0f * mRect.height()) / 2 + 12;
                 canvas.drawText(text, (width - mPaintText.measureText(text)) / 2, textPaintHeight, mPaintText);
             } else {
-                canvas.drawColor(Color.parseColor("#00A3E5"));//画面背景
+                canvas.drawColor(ContextCompat.getColor(mContext, R.color.zhipu_watchface_interactive_mode));//画面背景
 
                 textPaintHeight = (height - mPaintText.getTextSize() + 16);//文字到屏幕底部有一定间距
-
-                mCenterX = 1.0f * width / 2;//圆心X坐标
-                mCenterY = 1.0f * height / 2 - 28;//圆心Y坐标
-                mMaxRadius = Math.min(mCenterX, mCenterY);
 
                 this.paintPointer(canvas, hour, minute, second);
                 this.paintScaleNumber(canvas);
@@ -444,10 +424,10 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                 mPaintText.setTextSize(50f);
                 mPaintText.setTypeface(Typeface.defaultFromStyle(Typeface.ITALIC));
                 canvas.drawText(text, (width - mPaintText.measureText(text)) / 2, textPaintHeight, mPaintText);
-            }
 
-            this.drawComplications(canvas, System.currentTimeMillis());
-            this.drawUnreadNotificationIcon(canvas);
+                this.drawComplications(canvas, System.currentTimeMillis());
+                //this.drawUnreadNotificationIcon(canvas);
+            }
         }
 
         private void drawUnreadNotificationIcon(Canvas canvas) {
@@ -488,9 +468,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             mActiveComplicationDataSparseArray.put(watchFaceComplicationId, data);
 
             // Updates correct ComplicationDrawable with updated data.
-            ComplicationDrawable complicationDrawable =
-                    mComplicationDrawableSparseArray.get(watchFaceComplicationId);
-            complicationDrawable.setComplicationData(data);
+            mComplicationDrawableSparseArray.get(watchFaceComplicationId).setComplicationData(data);
 
             invalidate();
         }
@@ -525,22 +503,12 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
                 complicationDrawable.draw(canvas, currentTimeMillis);
             }
-            /*int complicationId;
-
-            for (int i = 0; i < COMPLICATION_IDS.length; i++) {
-                complicationId = COMPLICATION_IDS[i];
-                complicationDrawable = mComplicationDrawableSparseArray.get(complicationId);
-
-                complicationDrawable.draw(canvas, currentTimeMillis);
-            }*/
         }
 
         private Paint mBackgroundPaint;
         private int mBackgroundColor = Color.BLACK;
 
         private void initializeComplicationsAndBackground() {
-            Log.d(TAG, "initializeComplications()");
-
             // Initialize background color (in case background complication is inactive).
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(mBackgroundColor);
@@ -569,8 +537,7 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
             mComplicationDrawableSparseArray.put(LEFT_COMPLICATION_ID, leftComplicationDrawable);
             mComplicationDrawableSparseArray.put(RIGHT_COMPLICATION_ID, rightComplicationDrawable);
             mComplicationDrawableSparseArray.put(BOTTOM_COMPLICATION_ID, bottomComplicationDrawable);
-            mComplicationDrawableSparseArray.put(
-                    BACKGROUND_COMPLICATION_ID, backgroundComplicationDrawable);
+            mComplicationDrawableSparseArray.put(BACKGROUND_COMPLICATION_ID, backgroundComplicationDrawable);
 
             setComplicationsActiveAndAmbientColors(mWatchHandHighlightColor);
             setActiveComplications(COMPLICATION_IDS);
@@ -620,18 +587,24 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                     break;
                 case TAP_TYPE_TAP:
                     Log.d(TAG, onTapCommand + ", tap");
-                    // If your background complication is the first item in your array, you need
-                    // to walk backward through the array to make sure the tap isn't for a
-                    // complication above the background complication.
-                    for (int i = COMPLICATION_IDS.length - 1; i >= 0; i--) {
-                        int complicationId = COMPLICATION_IDS[i];
-                        ComplicationDrawable complicationDrawable =
-                                mComplicationDrawableSparseArray.get(complicationId);
+                    if (x >= 290 && x <= 330 && y >= 400 && y <= 4500) {
+                        Intent intent = new Intent("com.zhipu.watchface.CONFIG_COMPLICATION_SIMPLE");
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(intent);
+                    } else {
+                        // If your background complication is the first item in your array, you need
+                        // to walk backward through the array to make sure the tap isn't for a
+                        // complication above the background complication.
+                        for (int i = COMPLICATION_IDS.length - 1; i >= 0; i--) {
+                            int complicationId = COMPLICATION_IDS[i];
+                            ComplicationDrawable complicationDrawable =
+                                    mComplicationDrawableSparseArray.get(complicationId);
 
-                        boolean successfulTap = complicationDrawable.onTap(x, y);
+                            boolean successfulTap = complicationDrawable.onTap(x, y);
 
-                        if (successfulTap) {
-                            return;
+                            if (successfulTap) {
+                                return;
+                            }
                         }
                     }
                     break;
@@ -823,6 +796,15 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
 
         private boolean shouldTimerBeRunning() {
             return isVisible() && !mInAmbientMode;
+        }
+
+        private void setComplicationDrawable(Rect rect, ComplicationDrawable complicationDrawable) {
+            complicationDrawable.setBounds(rect);
+            complicationDrawable.setBorderColorActive(Color.YELLOW);
+            complicationDrawable.setTitleColorActive(Color.MAGENTA);//洋红色
+            complicationDrawable.setTextColorActive(Color.BLACK);
+            complicationDrawable.setIconColorActive(Color.GREEN);
+            complicationDrawable.setRangedValuePrimaryColorActive(Color.CYAN);//青色
         }
     }
 

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="color_item_circle_border_color">#424242</color>
+    <color name="zhipu_watchface_ambient_mode">#666666</color>
+    <color name="zhipu_watchface_interactive_mode">#00A3E5</color>
 </resources>
