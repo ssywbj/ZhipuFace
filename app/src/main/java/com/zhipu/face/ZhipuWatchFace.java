@@ -14,6 +14,10 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -35,6 +39,7 @@ import com.zhipu.face.config.AnalogComplicationConfigRecyclerViewAdapter;
 
 import java.lang.ref.WeakReference;
 import java.util.Calendar;
+import java.util.List;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
@@ -234,6 +239,34 @@ public class ZhipuWatchFace extends CanvasWatchFaceService {
                     ComplicationData.TYPE_SHORT_TEXT);*/
             setDefaultComplicationProvider(RIGHT_COMPLICATION_ID, new ComponentName(mContext, DataService.class)
                     , ComplicationData.TYPE_SHORT_TEXT);
+
+            SensorManager sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+            if (sensorManager == null) {
+                Log.e(TAG, "SensorManager is null !");
+            } else {
+                List<Sensor> list = sensorManager.getSensorList(Sensor.TYPE_ALL);
+                for (Sensor sensor : list) {
+                    Log.d(TAG, "sensor: " + sensor + ", name: " + sensor.getName());
+                }
+
+                Sensor stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+                if (stepCounterSensor == null) {
+                    Log.e(TAG, "StepCounterSensor is null !");
+                } else {
+                    sensorManager.registerListener(new SensorEventListener() {
+                        @Override
+                        public void onSensorChanged(SensorEvent event) {
+                            if (event.sensor.getType() == Sensor.TYPE_STEP_COUNTER) {
+                                Log.d(TAG, "onSensorChanged，当前步数：" + event.values[0]);//values[0]为计步历史累加值
+                            }
+                        }
+
+                        @Override
+                        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+                        }
+                    }, stepCounterSensor, SensorManager.SENSOR_DELAY_NORMAL);
+                }
+            }
         }
 
         private Bitmap mBackgroundBitmap;
