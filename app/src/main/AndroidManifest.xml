@@ -86,7 +86,7 @@
 
             <meta-data
                 android:name="android.service.wallpaper"
-                android:resource="@xml/watch_face" />
+                android:resource="@xml/my_watch_face_config" />
         </service>
 
         <service

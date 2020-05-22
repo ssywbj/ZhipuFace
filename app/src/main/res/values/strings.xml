@@ -1,7 +1,7 @@
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="app_name">ZhipuFace</string>
     <string name="message">Watch face tapped</string>
-    <string name="my_analog_name">My Analog</string>
+    <string name="my_analog_name">质朴针光</string>
 
     <string name="zhipu_analog_name">质朴表盘</string>
     <string name="zhipu_analog_complication_config">ZhipuAnalog Complication Config</string>
